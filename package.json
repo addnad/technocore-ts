@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "test": "tsx --test test/*.test.ts",
-    "build": "tsc"
+    "build": "tsc -p tsconfig.build.json && node -e \"const f=\\\"dist/cli.js\\\",s=require(\\\"fs\\\");s.writeFileSync(f,\\\"#\\\"+\\\"!/usr/bin/env node\\\\n\\\"+s.readFileSync(f,\\\"utf8\\\"));s.chmodSync(f,0o755)\""
   },
   "keywords": [],
   "author": "",
@@ -20,5 +20,13 @@
   "allowScripts": {
     "esbuild@0.28.2": true
   },
-  "compilerOptions": null
+  "compilerOptions": null,
+  "bin": {
+    "technocore": "dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ]
 }
