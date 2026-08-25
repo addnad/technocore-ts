@@ -1,0 +1,7 @@
+export * from "./did.js";
+export * from "./errors.js";
+export * from "./identity.js";
+export * from "./message.js";
+export * from "./client.js";
+export * from "./rooms.js";
+export * from "./note.js";

@@ -1,0 +1,12 @@
+node_modules/
+dist/
+
+# Identity material — never commit
+*.pem
+*.key
+identity.json
+
+# Local scratch
+scratch-*.ts
+kat.ts
+.DS_Store
