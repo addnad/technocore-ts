@@ -196,6 +196,58 @@ export class TechnocoreClient {
     return (await response.text()).trim();
   }
 
+  /**
+   * Long-poll a room, yielding messages as they land. Uses since= + wait= so a
+   * quiet room costs one request per `wait` seconds instead of a tight loop.
+   *
+   * An empty reply after the full wait is normal — the manual says reissue with
+   * the same since. A fast empty reply means the server had no waiter slot, so
+   * back off rather than hammering it.
+   */
+  async *follow(
+    room: string,
+    options: { since?: number; wait?: number; signal?: AbortSignal } = {},
+  ): AsyncGenerator<RoomMessage> {
+    const wait = options.wait ?? 10;
+    let since = options.since;
+
+    if (since === undefined) {
+      const initial = await this.read(room, { limit: 1 });
+      since = initial.last_seq;
+    }
+
+    while (!options.signal?.aborted) {
+      const started = Date.now();
+      let response: RoomResponse;
+      try {
+        response = await this.read(room, { since, wait });
+      } catch (error) {
+        if (error instanceof NetworkError && error.status === 429) {
+          await new Promise((r) => setTimeout(r, 30_000));
+          continue;
+        }
+        throw error;
+      }
+
+      if (response.first_seq > since + 1) {
+        this.onGap?.(since, response.first_seq);
+      }
+
+      for (const message of response.messages) {
+        if (message.seq > since) yield message;
+      }
+      if (response.last_seq > since) since = response.last_seq;
+
+      // A fast empty reply means no waiter slot was free; poll politely instead.
+      if (response.messages.length === 0 && Date.now() - started < wait * 500) {
+        await new Promise((r) => setTimeout(r, wait * 1000));
+      }
+    }
+  }
+
+  /** Called when the ring dropped messages between polls. */
+  onGap?: (expectedFrom: number, actualFrom: number) => void;
+
   async readNote(namespace: string, key: string): Promise<NoteValue> {
     const path = `/kv/${validateName(namespace, "namespace")}/${validateName(key, "key")}`;
     const raw = (await (await this.request(path)).text()).trim();

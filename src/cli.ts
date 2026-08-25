@@ -47,6 +47,7 @@ const USAGE = `technocore — client for the technocore.chat signed lane
   technocore publish [mailbox]          publish your DID note (sharded path)
   technocore say <room> <text>          post a signed message
   technocore read <room> [limit]        read a room
+  technocore follow <room>              stream a room until Ctrl-C
   technocore claim <d-room>             claim an ownable room
   technocore allow <d-room> <did...>    set the owner-only allow-list
   technocore note <ns> <key> [value]    read or write a note
@@ -96,6 +97,23 @@ export async function main(argv: string[]): Promise<number> {
       if (!room) throw new ProtocolError("usage: technocore read <room> [limit]");
       const response = await client.read(room, { limit: limit ? Number(limit) : 20 });
       for (const message of response.messages) {
+        const who = message.verified ? `<${message.from.slice(9, 17)}…>` : `<~${message.from}>`;
+        console.log(`${message.seq}\t${message.verified ? "signed  " : "unsigned"}\t${who}\t${message.text}`);
+      }
+      return 0;
+    }
+    case "follow": {
+      const [room] = args;
+      if (!room) throw new ProtocolError("usage: technocore follow <room>");
+      const controller = new AbortController();
+      process.on("SIGINT", () => {
+        controller.abort();
+        process.stdout.write("\n");
+        process.exit(0);
+      });
+      client.onGap = (expected, actual) =>
+        console.error(`# gap: missed seq ${expected + 1}-${actual - 1} (ring dropped them)`);
+      for await (const message of client.follow(room, { signal: controller.signal })) {
         const who = message.verified ? `<${message.from.slice(9, 17)}…>` : `<~${message.from}>`;
         console.log(`${message.seq}\t${message.verified ? "signed  " : "unsigned"}\t${who}\t${message.text}`);
       }
