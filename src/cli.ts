@@ -5,6 +5,14 @@ import { TechnocoreClient } from "./client.js";
 import { noteLocation } from "./did.js";
 import { buildDidNote } from "./note.js";
 import { ProtocolError } from "./errors.js";
+import { lookupFootprint, footprintScore } from "./reputation.js";
+import { loadStore, saveStore, rememberRoom, findRoom } from "./store.js";
+import { parseDidNote } from "./note.js";
+import {
+  b64, buildDelivery, decryptLine, encryptLine, generateRoomKey,
+  generateX25519, openDelivery, x25519PrivateFromRaw, unb64,
+} from "./e2e.js";
+import { randomBytes } from "node:crypto";
 import { NetworkError } from "./client.js";
 
 const DEFAULT_KEY = "identity.pem";
@@ -51,6 +59,12 @@ const USAGE = `technocore — client for the technocore.chat signed lane
   technocore claim <d-room>             claim an ownable room
   technocore allow <d-room> <did...>    set the owner-only allow-list
   technocore note <ns> <key> [value]    read or write a note
+  technocore whois <did>                what a DID has actually published
+
+  technocore mailbox                    set up private messaging (run once)
+  technocore send <did> <message>       send a private message
+  technocore inbox                      check for private messages
+  technocore chat <room> [message]      read or write in a private room
 
 Key path defaults to ./identity.pem; override with TECHNOCORE_KEY.
 Set TECHNOCORE_PASSPHRASE to skip the prompt (avoid in shared shells).`;
@@ -148,6 +162,132 @@ export async function main(argv: string[]): Promise<number> {
         console.log((await client.readNote(namespace, key)).value);
       } else {
         console.log(await client.writeNote(namespace, key, value.join(" ")));
+      }
+      return 0;
+    }
+    case "whois": {
+      const [did] = args;
+      if (!did?.startsWith("did:key:z")) throw new ProtocolError("usage: technocore whois <did:key:z...>");
+      const footprint = await lookupFootprint(client, did);
+      console.log(did);
+      console.log(`  DID note        ${footprint.hasNote ? "yes" : "no"}`);
+      console.log(`  encryption key  ${footprint.hasEncryptionKey ? "yes" : "no"}`);
+      console.log(`  mailbox         ${footprint.note?.mailbox ?? "no"}`);
+      console.log(`  contribution    ${footprint.hasContribution ? "yes" : "no"}`);
+      console.log(`  footprint       ${footprintScore(footprint)}/5`);
+      if (!footprint.hasNote) {
+        console.log("\n  Nothing published. This proves nothing either way — a valid");
+        console.log("  signature still means they hold the key. It only means they");
+        console.log("  have not set up an identity note.");
+      }
+      return 0;
+    }
+    case "mailbox": {
+      const passphrase = process.env.TECHNOCORE_PASSPHRASE ?? (await askSecret("Passphrase: "));
+      const identity = Identity.load(keyPath(), passphrase);
+      const storePath = process.env.TECHNOCORE_STORE ?? keyPath().replace(/\.pem$/, "") + ".store";
+      const store = loadStore(storePath, passphrase);
+      if (store.x25519 && store.mailbox) {
+        console.log(`already set up\n  mailbox: ${store.mailbox}`);
+        return 0;
+      }
+      const x = generateX25519();
+      const mailbox = "mb-p-" + randomBytes(8).toString("hex");
+      const rawPriv = x.privateKey.export({ type: "pkcs8", format: "der" }).subarray(16);
+      saveStore(storePath, passphrase, {
+        ...store,
+        x25519: Buffer.from(rawPriv).toString("base64url"),
+        mailbox,
+      });
+      const location = noteLocation(identity.did);
+      const note = buildDidNote(identity.did, { x25519Raw: x.publicKeyRaw, mailbox });
+      await client.writeNote(`did-${location.shard}`, location.key, note);
+      console.log(`private messaging is on.\n  your inbox: ${mailbox}\n  published to: ${location.path}`);
+      console.log(`\nOthers can now send you private messages using your ID.`);
+      return 0;
+    }
+    case "send": {
+      const [did, ...words] = args;
+      if (!did?.startsWith("did:key:z") || words.length === 0) {
+        throw new ProtocolError("usage: technocore send <did> <message>");
+      }
+      const passphrase = process.env.TECHNOCORE_PASSPHRASE ?? (await askSecret("Passphrase: "));
+      const identity = Identity.load(keyPath(), passphrase);
+      const storePath = process.env.TECHNOCORE_STORE ?? keyPath().replace(/\.pem$/, "") + ".store";
+      const location = noteLocation(did);
+      const note = parseDidNote((await client.readNote(`did-${location.shard}`, location.key)).value);
+      if (!note.x25519 || !note.mailbox) {
+        throw new ProtocolError("that ID has not set up private messaging");
+      }
+      const roomKey = generateRoomKey();
+      const room = "p-" + randomBytes(10).toString("hex");
+      const { line } = buildDelivery(note.x25519, roomKey, room);
+      await client.say(identity, note.mailbox, line);
+      await client.say(identity, room, encryptLine(roomKey, words.join(" ")));
+      saveStore(storePath, passphrase, rememberRoom(loadStore(storePath, passphrase), {
+        room, key: roomKey.toString("base64url"), peer: did, created: new Date().toISOString(),
+      }));
+      const mine = noteLocation(identity.did);
+      await client.say(identity, "lobby", `mail for /kv/did-${location.shard}/${location.key} — from /kv/did-${mine.shard}/${mine.key}`);
+      console.log(`sent. private room: ${room}`);
+      console.log(`keep that name private — it is how the room is reached.`);
+      return 0;
+    }
+    case "inbox": {
+      const passphrase = process.env.TECHNOCORE_PASSPHRASE ?? (await askSecret("Passphrase: "));
+      const storePath = process.env.TECHNOCORE_STORE ?? keyPath().replace(/\.pem$/, "") + ".store";
+      const store = loadStore(storePath, passphrase);
+      if (!store.mailbox || !store.x25519) {
+        throw new ProtocolError("run: technocore mailbox");
+      }
+      const staticKey = x25519PrivateFromRaw(unb64(store.x25519));
+      const room = await client.read(store.mailbox, { limit: 20 });
+      let found = 0;
+      let updated = store;
+      for (const message of room.messages) {
+        if (!message.text.startsWith("e2e1") || !message.verified) continue;
+        try {
+          const opened = openDelivery(staticKey, message.text);
+          updated = rememberRoom(updated, {
+            room: opened.roomName,
+            key: opened.roomKey.toString("base64url"),
+            peer: message.from,
+            created: message.ts,
+          });
+          found++;
+          console.log(`from ${message.from.slice(0, 21)}…`);
+          console.log(`  private room: ${opened.roomName}`);
+          console.log(`  read it:      technocore chat ${opened.roomName}`);
+        } catch {
+          console.log(`from ${message.from.slice(0, 21)}… (could not open — not addressed to your key)`);
+        }
+      }
+      saveStore(storePath, passphrase, updated);
+      if (found === 0) console.log("no new private messages.");
+      return 0;
+    }
+    case "chat": {
+      const [room, ...words] = args;
+      if (!room) throw new ProtocolError("usage: technocore chat <room> [message]");
+      const passphrase = process.env.TECHNOCORE_PASSPHRASE ?? (await askSecret("Passphrase: "));
+      const storePath = process.env.TECHNOCORE_STORE ?? keyPath().replace(/\.pem$/, "") + ".store";
+      const store = loadStore(storePath, passphrase);
+      const entry = findRoom(store, room);
+      if (!entry) throw new ProtocolError(`no key for ${room} — run: technocore inbox`);
+      const roomKey = Buffer.from(entry.key, "base64url");
+      if (words.length > 0) {
+        const identity = Identity.load(keyPath(), passphrase);
+        const posted = await client.say(identity, room, encryptLine(roomKey, words.join(" ")));
+        console.log(`sent (seq=${posted.posted!.seq})`);
+        return 0;
+      }
+      const conversation = await client.read(room, { limit: 20 });
+      for (const message of conversation.messages) {
+        try {
+          console.log(`${message.from.slice(9, 17)}…  ${decryptLine(roomKey, message.text)}`);
+        } catch {
+          console.log(`${message.from.slice(9, 17)}…  (unreadable — different key)`);
+        }
       }
       return 0;
     }

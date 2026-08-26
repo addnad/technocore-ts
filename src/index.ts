@@ -5,3 +5,5 @@ export * from "./message.js";
 export * from "./client.js";
 export * from "./rooms.js";
 export * from "./note.js";
+export * from "./reputation.js";
+export * from "./store.js";
