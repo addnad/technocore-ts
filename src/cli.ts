@@ -94,9 +94,32 @@ export async function main(argv: string[]): Promise<number> {
     case "publish": {
       const identity = await loadIdentity();
       const location = noteLocation(identity.did);
-      const note = buildDidNote(identity.did, args[0] ? { mailbox: args[0] } : {});
+
+      // Notes are last-write-wins, so republishing must MERGE. Overwriting here
+      // would silently drop an x25519 key or mailbox set up by `mailbox`, and
+      // take private messaging offline without telling anyone.
+      let existing: Record<string, string> = {};
+      let existingX25519: Uint8Array | undefined;
+      let existingMailbox: string | undefined;
+      try {
+        const current = parseDidNote((await client.readNote(`did-${location.shard}`, location.key)).value);
+        existing = { ...current.fields };
+        existingX25519 = current.x25519;
+        existingMailbox = current.mailbox;
+        delete existing.x25519;
+        delete existing.mailbox;
+      } catch {
+        // no note yet, or it does not parse — publish a fresh one
+      }
+
+      const note = buildDidNote(identity.did, {
+        x25519Raw: existingX25519,
+        mailbox: args[0] ?? existingMailbox,
+        extra: existing,
+      });
       console.log(await client.writeNote(`did-${location.shard}`, location.key, note));
       console.log(location.path);
+      if (existingX25519) console.log("kept your encryption key and inbox");
       return 0;
     }
     case "say": {
