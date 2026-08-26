@@ -219,11 +219,27 @@ export async function main(argv: string[]): Promise<number> {
       if (!note.x25519 || !note.mailbox) {
         throw new ProtocolError("that ID has not set up private messaging");
       }
+      // Reuse an existing room with this peer: only the first message needs a
+      // new room, and the network's room namespace is capped globally.
+      const existing = loadStore(storePath, passphrase).rooms.find((r) => r.peer === did);
+      if (existing) {
+        const identityForReply = Identity.load(keyPath(), passphrase);
+        await client.sayWithRetry(
+          identityForReply,
+          existing.room,
+          encryptLine(Buffer.from(existing.key, "base64url"), words.join(" ")),
+          { onRetry: (a) => console.log(`retrying (${a})…`) },
+        );
+        console.log(`sent to your existing private room: ${existing.room}`);
+        return 0;
+      }
       const roomKey = generateRoomKey();
       const room = "p-" + randomBytes(10).toString("hex");
       const { line } = buildDelivery(note.x25519, roomKey, room);
-      await client.say(identity, note.mailbox, line);
-      await client.say(identity, room, encryptLine(roomKey, words.join(" ")));
+      const onRetry = (attempt: number) =>
+        console.log(`network is at its room limit; retrying (${attempt})…`);
+      await client.sayWithRetry(identity, note.mailbox, line, { onRetry });
+      await client.sayWithRetry(identity, room, encryptLine(roomKey, words.join(" ")), { onRetry });
       saveStore(storePath, passphrase, rememberRoom(loadStore(storePath, passphrase), {
         room, key: roomKey.toString("base64url"), peer: did, created: new Date().toISOString(),
       }));

@@ -138,6 +138,33 @@ export class TechnocoreClient {
     return this.toRoomResponse(await this.json(`/r/${validRoom}?${params}`), validRoom);
   }
 
+  /**
+   * Post a signed message, retrying when the room namespace is momentarily at
+   * its global cap. Idle rooms are reclaimed continuously, so a 400 room-limit
+   * is a race to lose rather than a permanent failure.
+   */
+  async sayWithRetry(
+    identity: Identity,
+    room: string,
+    text: string,
+    options: { nonce?: string; attempts?: number; onRetry?: (attempt: number) => void } = {},
+  ): Promise<RoomResponse> {
+    const attempts = options.attempts ?? 4;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.say(identity, room, text, options);
+      } catch (error) {
+        const capped =
+          error instanceof NetworkError &&
+          error.status === 400 &&
+          error.message.includes("room limit reached");
+        if (!capped || attempt >= attempts) throw error;
+        options.onRetry?.(attempt);
+        await new Promise((r) => setTimeout(r, attempt * 3000));
+      }
+    }
+  }
+
   /** Post a signed message, then verify the server echoed our own record back. */
   async say(
     identity: Identity,
