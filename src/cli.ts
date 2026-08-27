@@ -150,6 +150,8 @@ export async function main(argv: string[]): Promise<number> {
       });
       client.onGap = (expected, actual) =>
         console.error(`# gap: missed seq ${expected + 1}-${actual - 1} (ring dropped them)`);
+      client.onRoomReset = (previous, tail) =>
+        console.error(`# room was recreated (seq restarted; cursor ${previous} > tail ${tail}) — resuming from the start`);
       for await (const message of client.follow(room, { signal: controller.signal })) {
         const who = message.verified ? `<${message.from.slice(9, 17)}…>` : `<~${message.from}>`;
         console.log(`${message.seq}\t${message.verified ? "signed  " : "unsigned"}\t${who}\t${message.text}`);

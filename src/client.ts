@@ -243,7 +243,26 @@ export class TechnocoreClient {
       since = initial.last_seq;
     }
 
+    // A poll carrying since= echoes the cursor back as last_seq when nothing is
+    // newer, so a reaped-and-recreated room (seq restarts at 1) is invisible to
+    // this loop. Probe cursor-free periodically: a tail below the cursor means a
+    // new room, so reset rather than stalling forever.
+    let nextProbe = Date.now() + 60_000;
+
     while (!options.signal?.aborted) {
+      if (Date.now() >= nextProbe) {
+        nextProbe = Date.now() + 60_000;
+        try {
+          const tail = await this.read(room, { limit: 1 });
+          if (tail.last_seq < since) {
+            this.onRoomReset?.(since, tail.last_seq);
+            since = 0;
+          }
+        } catch {
+          // a failed probe is not fatal; try again next interval
+        }
+      }
+
       const started = Date.now();
       let response: RoomResponse;
       try {
@@ -274,6 +293,9 @@ export class TechnocoreClient {
 
   /** Called when the ring dropped messages between polls. */
   onGap?: (expectedFrom: number, actualFrom: number) => void;
+
+  /** Called when the room was reaped and recreated, so seq restarted. */
+  onRoomReset?: (previousCursor: number, newTail: number) => void;
 
   async readNote(namespace: string, key: string): Promise<NoteValue> {
     const path = `/kv/${validateName(namespace, "namespace")}/${validateName(key, "key")}`;
