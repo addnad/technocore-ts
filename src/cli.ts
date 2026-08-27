@@ -12,7 +12,8 @@ import {
   b64, buildDelivery, decryptLine, encryptLine, generateRoomKey,
   generateX25519, openDelivery, x25519PrivateFromRaw, unb64,
 } from "./e2e.js";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createPublicKey } from "node:crypto";
+import { loadX25519, rawFromX25519Public } from "./e2e.js";
 import { NetworkError } from "./client.js";
 
 const DEFAULT_KEY = "identity.pem";
@@ -62,6 +63,7 @@ const USAGE = `technocore — client for the technocore.chat signed lane
   technocore whois <did>                what a DID has actually published
 
   technocore mailbox                    set up private messaging (run once)
+  technocore import-key <file>          adopt an existing X25519 key file
   technocore send <did> <message>       send a private message
   technocore inbox                      check for private messages
   technocore chat <room> [message]      read or write in a private room
@@ -216,6 +218,25 @@ export async function main(argv: string[]): Promise<number> {
         console.log(`already set up\n  mailbox: ${store.mailbox}`);
         return 0;
       }
+      // A published key with no local store means the key lives somewhere this
+      // command cannot see. Minting a new one would orphan every message already
+      // sent to the old inbox, so refuse and say how to recover.
+      try {
+        const loc = noteLocation(identity.did);
+        const published = parseDidNote((await client.readNote(`did-${loc.shard}`, loc.key)).value);
+        if (published.x25519) {
+          console.error("error: your published note already advertises an encryption key,");
+          console.error("but this machine has no matching store. Creating a new one would");
+          console.error("make every message already sent to your inbox unreadable.");
+          console.error("");
+          console.error("  have the key file?   technocore import-key <file>");
+          console.error("  lost it for good?    TECHNOCORE_FORCE_NEW_KEY=1 technocore mailbox");
+          if (!process.env.TECHNOCORE_FORCE_NEW_KEY) return 1;
+          console.error("\nTECHNOCORE_FORCE_NEW_KEY set — replacing the key.\n");
+        }
+      } catch {
+        // no published note yet, which is the ordinary first-run case
+      }
       const x = generateX25519();
       const mailbox = "mb-p-" + randomBytes(8).toString("hex");
       const rawPriv = x.privateKey.export({ type: "pkcs8", format: "der" }).subarray(16);
@@ -330,6 +351,33 @@ export async function main(argv: string[]): Promise<number> {
           console.log(`${message.from.slice(9, 17)}…  (unreadable — different key)`);
         }
       }
+      return 0;
+    }
+    case "import-key": {
+      const [file] = args;
+      if (!file) throw new ProtocolError("usage: technocore import-key <file>");
+      const passphrase = process.env.TECHNOCORE_PASSPHRASE ?? (await askSecret("Passphrase: "));
+      const identity = Identity.load(keyPath(), passphrase);
+      const privateKey = loadX25519(file, passphrase);
+      const publicRaw = rawFromX25519Public(createPublicKey(privateKey));
+
+      const loc = noteLocation(identity.did);
+      const published = parseDidNote((await client.readNote(`did-${loc.shard}`, loc.key)).value);
+      if (!published.x25519) throw new ProtocolError("your note advertises no encryption key");
+      if (Buffer.from(published.x25519).toString("base64url") !== b64(publicRaw)) {
+        throw new ProtocolError("that key does not match the one in your published note");
+      }
+      if (!published.mailbox) throw new ProtocolError("your note advertises no mailbox");
+
+      const storePath = process.env.TECHNOCORE_STORE ?? keyPath().replace(/\.pem$/, "") + ".store";
+      const rawPriv = privateKey.export({ type: "pkcs8", format: "der" }).subarray(16);
+      saveStore(storePath, passphrase, {
+        ...loadStore(storePath, passphrase),
+        x25519: Buffer.from(rawPriv).toString("base64url"),
+        mailbox: published.mailbox,
+      });
+      console.log(`imported. your inbox: ${published.mailbox}`);
+      console.log(`read it with: technocore inbox`);
       return 0;
     }
     default:
