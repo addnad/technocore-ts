@@ -5,24 +5,28 @@ export const MAX_NOTE_BYTES = 8192;
 export const NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,47}$/;
 
 /**
- * Replace every invisible character with a space, exactly as the server does
- * before storage: C0/C1 controls (newline included), format characters,
- * zero-width joiners and bidi overrides. Signatures MUST cover the swept text,
- * because the swept bytes are what gets stored and later re-verified.
+ * Replace every invisible character with a space and trim, exactly as the
+ * server's clean_text does before storage. Signatures MUST cover the swept
+ * text, because the swept bytes are what gets stored and later re-verified.
+ *
+ * The categories are named rather than enumerated so the set cannot be
+ * incomplete: the server tests unicodedata.category(c) against
+ * ("Cc","Cf","Cs","Co","Zl","Zp"), and this class is the same six.
+ *
+ * Two things here are load-bearing and easy to lose in review:
+ *   - .trim() matches the server's trailing .strip(). Without it a stray
+ *     newline or BOM at an edge becomes a space the server removes and this
+ *     client does not, and the signature fails with a bare 403.
+ *   - Zs stays OUT of the class. The server keeps Zs, so NBSP must survive.
+ *     Do not add it because the constant is called INVISIBLE.
+ *
+ * The u flag matches by code point, so astral characters need no manual
+ * surrogate handling and \p{Cs} still catches an unpaired surrogate.
  */
+const INVISIBLE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Zl}\p{Zp}]/gu;
+
 export function sweepToSingleLine(text: string): string {
-  return Array.from(text)
-    .map((char) => {
-      const code = char.codePointAt(0)!;
-      if (code <= 0x1f || (code >= 0x7f && code <= 0x9f)) return " ";
-      if (code === 0x200b || code === 0x200c || code === 0x200d) return " ";
-      if (code >= 0x2028 && code <= 0x202e) return " ";
-      if (code >= 0x2060 && code <= 0x2064) return " ";
-      if (code >= 0x206a && code <= 0x206f) return " ";
-      if (code === 0xfeff) return " ";
-      return char;
-    })
-    .join("");
+  return text.replace(INVISIBLE, " ").trim();
 }
 
 export function validateName(value: string, label = "room"): string {
@@ -40,9 +44,17 @@ export function validateNonce(value: string | number | bigint): string {
   return nonce;
 }
 
-/** Millisecond clock, which satisfies the strictly-increasing nonce rule. */
+let lastNonce = 0;
+
+/**
+ * Strictly increasing nonce. The server requires the nonce to exceed the last
+ * one it can see from this key, so a bare millisecond clock collides when two
+ * messages are sent inside the same millisecond and the second is refused as a
+ * replay.
+ */
 export function nextNonce(): string {
-  return Date.now().toString();
+  lastNonce = Math.max(Date.now(), lastNonce + 1);
+  return lastNonce.toString();
 }
 
 /**
