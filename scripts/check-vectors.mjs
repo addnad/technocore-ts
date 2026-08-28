@@ -9,7 +9,10 @@
  *     moved, so the client may have a divergence it has no vector for yet.
  *
  * A network failure is neither of those, and exits 0 with a warning. A check that goes red when
- * DNS hiccups is a check people learn to ignore, and then it is not a check.
+ * DNS hiccups is a check people learn to ignore, and then it is not a check. One HTTP status is
+ * treated as a real failure rather than a hiccup: 404 means the ref is gone, which is a durable
+ * answer and not a hiccup, and a warning there would leave this script passing while measuring
+ * nothing at all.
  *
  * Usage: node scripts/check-vectors.mjs
  */
@@ -40,16 +43,40 @@ if (vendoredDigest !== source.vendored_sha256) {
 }
 console.log(`ok    vendored fixture matches source.json (${vendoredDigest.slice(0, 12)}...)`);
 
-let remoteBytes;
+let response;
 try {
-  const response = await fetch(source.raw_url, { redirect: "follow" });
-  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);
-  remoteBytes = Buffer.from(await response.arrayBuffer());
+  response = await fetch(source.raw_url, { redirect: "follow" });
 } catch (error) {
+  // Never reached the server: DNS, timeout, connection reset. Transient by nature.
   console.warn(`warn  could not reach upstream, skipping the freshness half: ${error.message}`);
   console.warn(`      ${source.raw_url}`);
   process.exit(0);
 }
+
+// A 404 is not a network failure. It is a durable answer from a server we did reach: the ref is
+// gone. Warning and exiting 0 would leave the freshness half permanently dead behind a green
+// check - the same "stays green and says nothing" failure this script exists to catch - so it is
+// the one HTTP status that fails hard.
+if (response.status === 404) {
+  fail(
+    `upstream fixture is gone (HTTP 404).\n` +
+      `      ${source.raw_url}\n` +
+      `      The ref named in source.json no longer exists, so the freshness half cannot run.\n` +
+      `      Left as a warning this check would keep passing while testing nothing. If the\n` +
+      `      upstream pull request has merged, repoint raw_url at ${source.repo} on the merged\n` +
+      `      branch and drop pull_request; if the ref was renamed, follow it.`,
+  );
+}
+if (!response.ok) {
+  // 5xx, 429, and friends: the server is reachable but not answering usefully right now.
+  console.warn(
+    `warn  upstream returned HTTP ${response.status} ${response.statusText}, ` +
+      `skipping the freshness half`,
+  );
+  console.warn(`      ${source.raw_url}`);
+  process.exit(0);
+}
+const remoteBytes = Buffer.from(await response.arrayBuffer());
 
 const remoteDigest = sha256(remoteBytes);
 if (remoteDigest === vendoredDigest) {
