@@ -1,0 +1,45 @@
+name: ci
+
+# The scheduled run is the point of this file, not an extra: a divergence between this client and
+# the server's fixture can appear with no commit here at all — the server changes, and nothing in
+# the repo knows. Push and pull_request cover the code moving; the schedule covers the protocol
+# moving underneath it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "23 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 20 is the floor in package.json engines; lts/* is what most people actually run.
+        node-version: ["20", "lts/*"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      # tsx transpiles without checking, so nothing else in the pipeline would catch a type error
+      # in a test file.
+      - run: npx tsc -p tsconfig.json --noEmit
+      - run: npm test
+
+  vectors:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+      # No npm ci: the check uses only node builtins, and keeping it dependency-free means it
+      # still runs when the install step is the thing that is broken.
+      - run: node scripts/check-vectors.mjs

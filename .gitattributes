@@ -1,0 +1,5 @@
+# The conformance fixture is compared to the copy upstream by SHA-256 over its raw bytes, so a
+# line-ending conversion on checkout would break `npm run vectors:check` on Windows while changing
+# nothing about the content — and pass on Linux CI, which is the worst way for it to fail. `-text`
+# keeps the file byte-identical on every platform.
+test/vectors/vectors.json -text

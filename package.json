@@ -5,6 +5,8 @@
   "main": "dist/index.js",
   "scripts": {
     "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "vectors:check": "node scripts/check-vectors.mjs",
     "build": "tsc -p tsconfig.build.json && node -e \"const f=\\\"dist/cli.js\\\",s=require(\\\"fs\\\");s.writeFileSync(f,\\\"#\\\"+\\\"!/usr/bin/env node\\\\n\\\"+s.readFileSync(f,\\\"utf8\\\"));s.chmodSync(f,0o755)\""
   },
   "keywords": [
