@@ -1,0 +1,10 @@
+{
+  "repo": "flop-labs/technocore-chat",
+  "path": "tests/conformance/vectors.json",
+  "raw_url": "https://raw.githubusercontent.com/Orvynel/technocore-chat/test/signed-lane-conformance-vectors/tests/conformance/vectors.json",
+  "pull_request": "https://github.com/flop-labs/technocore-chat/pull/318",
+  "vendored_sha256": "7d5c46731690595c191e654be8529e1d99962cb0c25d540557fb014a5d7f1460",
+  "vendored_on": "2026-08-29",
+  "ref_is_moving": true,
+  "note": "raw_url points at a branch, not a commit, on purpose: a pinned commit's content never changes, so pinning one would make scripts/check-vectors.mjs incapable of ever noticing drift. The digest is what is pinned. When the upstream PR merges, change raw_url to the flop-labs/technocore-chat main branch and drop pull_request; nothing else here or in the suite depends on the fork."
+}
