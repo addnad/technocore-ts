@@ -148,7 +148,9 @@ export function saveX25519(privateKey: KeyObject, path: string, passphrase: stri
     privateKey.export({ type: "pkcs8", format: "pem", cipher: "aes-256-cbc", passphrase }),
     { mode: 0o600 },
   );
-  chmodSync(path, 0o600);
+  // chmod is a no-op on win32 — see the note in identity.ts. The contents
+  // are encrypted either way; only the POSIX permission bits are absent.
+  if (process.platform !== "win32") chmodSync(path, 0o600);
 }
 
 export function loadX25519(path: string, passphrase: string): KeyObject {

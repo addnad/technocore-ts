@@ -1,6 +1,6 @@
 {
   "name": "technocore",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Zero-dependency TypeScript client for the Technocore signed lane",
   "main": "dist/index.js",
   "scripts": {

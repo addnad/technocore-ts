@@ -41,7 +41,11 @@ test("save writes an encrypted PEM at mode 600 and round-trips", () => {
   const identity = Identity.generate();
   identity.save(path, "correct horse battery staple");
   assert.match(readFileSync(path, "utf8"), /^-----BEGIN ENCRYPTED PRIVATE KEY-----/);
-  assert.equal(statSync(path).mode & 0o777, 0o600);
+  // win32 cannot clear the group and other bits, so the POSIX assertion only
+  // holds where POSIX permissions do.
+  if (process.platform !== "win32") {
+    assert.equal(statSync(path).mode & 0o777, 0o600);
+  }
   assert.equal(Identity.load(path, "correct horse battery staple").did, identity.did);
   assert.throws(() => Identity.load(path, "wrong passphrase"));
 });

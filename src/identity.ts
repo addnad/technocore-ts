@@ -59,7 +59,11 @@ export class Identity {
       passphrase,
     });
     writeFileSync(path, pem, { mode: 0o600 });
-    chmodSync(path, 0o600);
+    // chmod is a no-op on win32 — the POSIX bits are never honoured there, so
+    // the file lands with default ACLs. The key is still encrypted, but it is
+    // not permission-protected the way it is on POSIX. Skip the call rather
+    // than pretending it did something.
+    if (process.platform !== "win32") chmodSync(path, 0o600);
   }
 
   /** Sign bytes; returns 86 unpadded base64url characters. */

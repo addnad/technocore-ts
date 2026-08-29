@@ -60,7 +60,9 @@ export function saveStore(path: string, passphrase: string, store: StoreShape): 
     Buffer.concat([Buffer.from(MAGIC), salt, nonce, cipher.getAuthTag(), body]),
     { mode: 0o600 },
   );
-  chmodSync(path, 0o600);
+  // chmod is a no-op on win32 — see the note in identity.ts. The contents
+  // are encrypted either way; only the POSIX permission bits are absent.
+  if (process.platform !== "win32") chmodSync(path, 0o600);
 }
 
 export function rememberRoom(store: StoreShape, entry: RoomEntry): StoreShape {
