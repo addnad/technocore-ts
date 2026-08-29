@@ -45,6 +45,7 @@ parsed string would then be testing the JSON layer while appearing to test the s
 | `identities` | `didFromPublicKey` from a seed, `publicKeyFromDid`, `fingerprint`, `noteLocation` |
 | `did_invalid` | that eight malformed `did:key` values are each refused |
 | `signature_cases` | payload assembly byte-for-byte, `Identity.sign`, `verifySignature`, and that the *unswept* payload does **not** verify |
+| — | that `Identity.sign` only ever emits a spelling the server accepts (see below) |
 
 The exhaustive row is the one that matters most. Hand-picked vectors caught the `0.2.2` sweep bug
 after it shipped; comparing the whole code point space against `provenance.invisible_categories`

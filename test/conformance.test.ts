@@ -67,7 +67,7 @@ interface SignatureCase {
   text_swept_cp: number[];
   payload_utf8_hex: string;
   sig_canonical: string;
-  sig_accepted_spellings: string[];
+  sig_same_bytes_spellings: string[];
   note: string;
 }
 
@@ -342,16 +342,19 @@ for (const c of VECTORS.signature_cases) {
   });
 }
 
-test("the encoder only ever produces the canonical spelling of a signature", () => {
+test("the encoder only ever produces the spelling the server accepts", () => {
   /*
    * 64 bytes spell as 86 unpadded base64url characters: 516 bits of alphabet for 512 bits of
    * data. The last character's low four bits carry nothing, so sixteen strings decode to the
-   * same signature and the server accepts all sixteen.
+   * same signature and every base64url decoder in circulation accepts all sixteen.
    *
    * Only four alphabet characters have those bits clear, and a zero-filling encoder always lands
-   * on one of them. That is why tightening the server to require the canonical spelling — the
-   * proposal in flop-labs/technocore-chat#178 — would be a tightening and not a break: nothing
-   * that zero-fills has ever emitted the other fifteen. This pins our half of that claim.
+   * on one of them. That is why tightening the server to require the canonical spelling —
+   * flop-labs/technocore-chat#178, now merged — was a tightening and not a break: nothing that
+   * zero-fills has ever emitted the other fifteen. This is the test that says so for THIS
+   * client, and after #178 it is no longer a claim about a proposal: `sig` must now end in one
+   * of these characters or the server refuses the write with a 403, so this is the one test here
+   * standing between us and every signed write failing.
    */
   const canonical = VECTORS.provenance.canonical_sig_last_chars;
 
@@ -360,26 +363,51 @@ test("the encoder only ever produces the canonical spelling of a signature", () 
     assert.ok(
       canonical.includes(signature.slice(-1)),
       `${c.name}: signature ends ${signature.slice(-1)}, which is not one of ${canonical}, so ` +
-        `requiring the canonical spelling would reject signatures this client produces`,
+        `the server would refuse every signed write this client makes`,
     );
-    assert.equal(c.sig_accepted_spellings[0], c.sig_canonical, "spelling 0 must be canonical");
+    assert.equal(c.sig_same_bytes_spellings[0], c.sig_canonical, "spelling 0 must be canonical");
   }
 });
 
 for (const c of VECTORS.signature_cases) {
-  test(`signature: every recorded spelling of ${c.name} verifies today`, () => {
-    // Documents the server's current permissiveness rather than endorsing it. If #178 lands,
-    // this inverts: the canonical spelling keeps verifying and the other fifteen are refused on
-    // the encoding. The data for that flip is already here — index 0 is canonical by
-    // construction — so it is an assertion change, not a re-vendor.
+  test(`signature: all sixteen spellings of ${c.name} decode to one signature`, () => {
+    /*
+     * #178 landed, and this test did NOT invert — which is worth stating, because I said it
+     * would. Here is the distinction I had missed.
+     *
+     * #178 constrained the server's `SIG_PATTERN`, not the cryptography. All sixteen strings
+     * still decode to identical bytes and still verify, and that is the whole reason the
+     * refusal had to live in a string pattern: Ed25519 is handed decoded bytes and cannot tell
+     * the sixteen apart, so no verifier could reject them. This client's `verifySignature` is a
+     * verifier. Making it refuse the fifteen would be reimplementing the server's wire policy
+     * inside a crypto function, on a path where those strings cannot arrive: it is only ever
+     * called on signatures we just produced, and the server never sends a `sig` back — `from`
+     * is the trust signal (see `Message.verified`).
+     *
+     * So the direction that can actually hurt a caller is the opposite one, and it is pinned
+     * above: emit a non-canonical spelling and every signed write is refused. The hazard this
+     * loop documents is re-encoding — `Buffer.from(sig, "base64url")` ignores the unused bits,
+     * so a signature you decode and re-encode by hand verifies here and is refused by the
+     * server. Do not round-trip a signature; send what `sign()` returned.
+     */
     const payload = Buffer.from(c.payload_utf8_hex, "hex");
-    assert.equal(c.sig_accepted_spellings.length, 16);
-    for (const spelling of c.sig_accepted_spellings) {
+    assert.equal(c.sig_same_bytes_spellings.length, 16);
+    const bytes = new Set<string>();
+    for (const spelling of c.sig_same_bytes_spellings) {
       assert.equal(spelling.length, 86);
+      bytes.add(Buffer.from(spelling, "base64url").toString("hex"));
       assert.doesNotThrow(
         () => verifySignature(c.did, spelling, payload),
-        `spelling ${spelling.slice(-1)} did not verify, but the server accepts it`,
+        `spelling ${spelling.slice(-1)} did not verify, so the sixteen do not share bytes`,
       );
     }
+    assert.equal(bytes.size, 1, "all sixteen must decode to the same 64 bytes");
+
+    // The server's half, asserted against the pattern it publishes rather than against a copy
+    // of the rule: exactly one of the sixteen is a legal `sig`, and it is the one at index 0.
+    const accepted = c.sig_same_bytes_spellings.filter((s) =>
+      new RegExp(`^${VECTORS.provenance.sig_pattern}$`).test(s),
+    );
+    assert.deepEqual(accepted, [c.sig_canonical], "exactly the canonical spelling is a legal sig");
   });
 }
