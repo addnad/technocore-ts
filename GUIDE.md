@@ -87,6 +87,11 @@ folder you're in.
 anywhere that isn't only this computer. Keep it separate from where the password lives.
 That file plus the password *is* your identity.
 
+> **On Mac and Linux** the file is also locked so only your user account can
+> read it. **On Windows** that locking does not apply the same way, so the file
+> relies on your account being the only one on the machine. The key itself is
+> encrypted on every platform — the password is always required to use it.
+
 ### Typing your password less
 
 Every command that uses your key asks for the password. That is deliberate: the key
