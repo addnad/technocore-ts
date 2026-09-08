@@ -302,11 +302,13 @@ export class TechnocoreClient {
     const raw = (await (await this.request(path)).text()).trim();
     const marker = raw.indexOf("!! UNTRUSTED CONTENT");
     if (marker === -1) return { value: raw, bannered: false };
-    const newline = raw.indexOf("\n", marker);
-    return {
-      value: newline === -1 ? "" : raw.slice(newline + 1).trim(),
-      bannered: true,
-    };
+    // The server format is always: BANNER\n\n<value>\n[# budget: ...\n]
+    // The sweep guarantees the value is single-line, so line index 2 is
+    // exactly the value regardless of whether the budget footer is present.
+    // Slicing after the first \n and trimming looked equivalent but handed
+    // the caller value + footer when the read bucket dropped below 25%.
+    const value = raw.split("\n")[2] ?? "";
+    return { value, bannered: true };
   }
 
   async writeNote(namespace: string, key: string, value: string): Promise<string> {
