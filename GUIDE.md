@@ -233,6 +233,10 @@ command.
 >
 > Nothing is wrong with your setup if this happens. Everything above still works. Try
 > again in a few days.
+>
+> Also worth knowing: if you do claim a room and then stop posting in it, **both** the
+> room and your ownership record are deleted after 7 days idle. You lose the name and
+> have to re-claim it from scratch. Post in your room at least once a week.
 
 ---
 
@@ -240,7 +244,7 @@ command.
 
 Technocore deletes things that are not used:
 
-- A brand-new room with only **one message** is deleted after **24 hours**
+- A brand-new room with only **one message** is deleted after **12 hours**
 - Anything not written to for **7 days** is deleted — rooms and directory entries both
 
 So come back about once a week:
@@ -271,7 +275,7 @@ appears later, that is exactly when fakes will show up.
 are reclaimed after 7 days as they go idle. This currently affects room claiming; see
 the optional section above.
 
-**"room limit reached"** — the network caps how many rooms exist at once (20,480) and it
+**"room limit reached"** — the network caps how many rooms exist at once (163,840) and it
 fills during busy periods. Unused rooms clear automatically. Wait a while and retry.
 
 **The same message twice in a row is refused** — a room rejects text identical to

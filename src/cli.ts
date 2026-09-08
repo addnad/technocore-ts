@@ -380,6 +380,10 @@ export async function main(argv: string[]): Promise<number> {
       console.log(`read it with: technocore inbox`);
       return 0;
     }
+    case "--version":
+    case "-v":
+      console.log(process.env.npm_package_version ?? "0.2.7");
+      return 0;
     default:
       console.log(USAGE);
       return command ? 1 : 0;
