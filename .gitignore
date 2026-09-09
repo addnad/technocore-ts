@@ -10,3 +10,7 @@ identity.json
 scratch-*.ts
 kat.ts
 .DS_Store
+tclk/node_modules/
+tclk/dist/
+tclk/offer-*.json
+tclk/secret-*.json
