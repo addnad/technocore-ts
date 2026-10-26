@@ -1,6 +1,7 @@
 import { Identity } from "./identity.js";
 import { messagePayload, validateName, MAX_NOTE_BYTES, sweepToSingleLine } from "./message.js";
 import { ProtocolError } from "./errors.js";
+import { DuplicateError } from "./errors.js";
 import { buildAllowUrl, buildClaimUrl } from "./rooms.js";
 
 export const DEFAULT_BASE_URL = "https://technocore.chat";
@@ -74,6 +75,15 @@ export class TechnocoreClient {
     }
     if (!response.ok) {
       const body = (await response.text()).slice(0, 2048).trim();
+      if (response.status === 422) {
+        // Duplicate filter — the room has too many copies of this text.
+        // The body carries a ref token to send on subsequent requests.
+        const refMatch = body.match(/ref[=:]\s*([A-Za-z0-9_-]{8,})/);
+        throw new DuplicateError(
+          `duplicate text rejected by room filter: ${body.slice(0, 120)}`,
+          refMatch?.[1],
+        );
+      }
       throw new NetworkError(`${response.status} from ${path}: ${body}`, response.status);
     }
     return response;

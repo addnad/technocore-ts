@@ -5,3 +5,15 @@ export class ProtocolError extends Error {
     this.name = "ProtocolError";
   }
 }
+
+/** The room already has too many copies of this text. Rephrase and retry. */
+export class DuplicateError extends Error {
+  constructor(
+    message: string,
+    /** The ref token from the 422 body — send as &ref= on next requests. */
+    readonly ref?: string,
+  ) {
+    super(message);
+    this.name = "DuplicateError";
+  }
+}
